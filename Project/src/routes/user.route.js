@@ -1,10 +1,12 @@
 import { Router } from "express"
-import { registerUser } from "../controllers/user.controllers.js"
+import { LoggedOutUser, loginUser, registerUser } from "../controllers/user.controllers.js"
 import { upload } from "../middlewares/multer.middleware.js";
+import { verifyJWT } from "../middlewares/auth.middleware.js";
 const router = Router()
 
 // To Register the user 
 router.route("/register").post(
+    // Injecting this Middleware Before the register method to upload the File
     upload.fields([
         {
             name: "avatar",
@@ -18,10 +20,12 @@ router.route("/register").post(
     registerUser);
 
 // For login the user
-// router.route("/login").post(loginUser);
+router.route("/login").post(loginUser);
 
-// For logout the user
-// router.route("/login").post(loginOut);
+// Secured Routes
+// Injecting the verifyJWT Middleware Token before LoggedOutUser method to get the Token of Login User
+router.route("/logout").post(verifyJWT,LoggedOutUser);
+
 
 
 

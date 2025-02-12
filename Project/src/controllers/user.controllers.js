@@ -4,6 +4,43 @@ import { User } from '../models/user.model.js';
 import { uploadOnCloudinary } from "../utils/Cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 
+const generateAccessTokenAndRefreshTokens = async (userId) => {
+    try {
+        // Step 1: Find the user in the database using the provided userId
+        const user = await User.findById(userId);
+
+        // Step 2: If the user does not exist, throw an error
+        if (!user) {
+            throw new ApiError(404, "User not found");
+        }
+
+        // Step 3: Generate a refresh token using the user schema method
+        const refreshToken = user.generateRefreshToken();
+
+        // Step 4: Generate an access token using the user schema method
+        const accessToken = user.generateAccessToken();
+
+        // Step 5: Attempt to save the user in the database with the generated tokens
+        try {
+            await user.save({ validateBeforeSave: false });
+        } catch (error) {
+            // Log any errors that occur while saving the user
+            console.error("Error saving user:", error);
+
+            // Throw a specific error indicating that saving failed
+            throw new ApiError(500, "Failed to save user");
+        }
+
+        // Step 6: Return the generated access and refresh tokens
+        return { accessToken, refreshToken };
+    } catch (error) {
+        // If any error occurs in the process, throw a generic error
+        throw new ApiError(500, "Something went wrong while generating tokens");
+    }
+};
+
+
+// Register a user Method
 const registerUser = asyncHandler(async (req, res) => {
     // get user details from frontend
     // Validation - not empty
@@ -39,7 +76,7 @@ const registerUser = asyncHandler(async (req, res) => {
     // Handle file uploads and check for avatar
     const avatarLocalPath = req.files?.avatar ? req.files.avatar[0]?.path : null;
     const coverImageLocalPath = req.files?.coverImage ? req.files.coverImage[0]?.path : null;
-    
+
     if (!avatarLocalPath) {
         throw new ApiError(400, "Avatar image Local Path is not Found");
     }
@@ -78,4 +115,86 @@ const registerUser = asyncHandler(async (req, res) => {
     )
 });
 
-export { registerUser };
+// Login a User Method
+const loginUser = asyncHandler(async (req, res) => {
+
+    // Step 1: Extract data from the request body
+    const { email, username, password } = req.body;
+
+    // Step 2: Validate if either email or username is provided
+    if (!username || !email) {
+        throw new ApiError(400, "Username or email is required");
+    }
+
+    // Step 3: Find the user in the database using email or username
+    const user = await User.findOne({
+        $or: [{ username }, { email }]
+    });
+
+    // If user does not exist, throw an error
+    if (!user) {
+        throw new ApiError(404, "User does not exist");
+    }
+
+    // Step 4: Check if the provided password is correct
+    const isPasswordValid = await user.isPasswordCorrect(password);
+
+    // If password is incorrect, throw an error
+    if (!isPasswordValid) {
+        throw new ApiError(401, "Password is incorrect");
+    }
+
+    // Step 5: Generate access and refresh tokens
+    const { accessToken, refreshToken } = await generateAccessTokenAndRefreshTokens(user._id);
+
+    // Step 6: Fetch the user data excluding password and refresh token
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
+
+    // Step 7: Define cookie options for security
+    const options = {
+        httpOnly: true,  // Prevents client-side JavaScript from accessing the cookie
+        secure: true     // Ensures the cookie is sent only over HTTPS
+    };
+
+    // Step 8: Send response with cookies and user details
+    return res
+        .status(200)
+        .cookie("accessToken", accessToken, options)   // Sets access token in an HTTP-only cookie
+        .cookie("refreshToken", refreshToken, options) // Sets refresh token in an HTTP-only cookie
+        .json({
+            status: 200,
+            message: "User logged in successfully",
+            user: loggedInUser,
+            accessToken,
+            refreshToken
+        });
+});
+
+// Loggedout Method
+const LoggedOutUser = asyncHandler(async (req, res) => {
+
+    // Remove the refresh token from the database
+    await User.findByIdAndUpdate(
+        req.user._id,
+        { $set: { refreshToken: undefined } },
+        { new: true }
+    );
+
+    const options = {
+        httpOnly: true,
+        secure: true
+    };
+
+    return res
+        .status(200)
+        .clearCookie("accessToken", options) // Clear access token
+        .clearCookie("refreshToken", options) // Clear refresh token
+        .json({
+            status: 200,
+            message: "User logged out successfully"
+        });
+
+});
+
+
+export { registerUser, loginUser, LoggedOutUser };
