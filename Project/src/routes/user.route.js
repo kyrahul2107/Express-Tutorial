@@ -1,5 +1,5 @@
 import { Router } from "express"
-import { LoggedOutUser, loginUser, registerUser } from "../controllers/user.controllers.js"
+import { LoggedOutUser, loginUser, registerUser ,refreshAccessToken, changeCurrentPassword, getCurrentUser, UpdateAccountDetails, updateUserAvtar, updateUserCoverImage, getUserChannelProfile, getWatchHistory} from "../controllers/user.controllers.js"
 import { upload } from "../middlewares/multer.middleware.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
 const router = Router()
@@ -25,9 +25,19 @@ router.route("/login").post(loginUser);
 // Secured Routes
 // Injecting the verifyJWT Middleware Token before LoggedOutUser method to get the Token of Login User
 router.route("/logout").post(verifyJWT,LoggedOutUser);
+// To Refersh the access Token when It expires
+router.route("/refresh-token").post(refreshAccessToken);
 
 
 
+router.route("/change-password").post(verifyJWT,changeCurrentPassword)
+router.route("/current-user").get(verifyJWT,getCurrentUser);
+router.route("/update-account").patch(verifyJWT,UpdateAccountDetails);
+router.route("/avatar").patch(verifyJWT,upload.single("avatar"),updateUserAvtar);
+router.route("/cover-image")
+.patch(verifyJWT,upload.single("/coverImage"),updateUserCoverImage)
+router.route("/channel/:username").get(verifyJWT,getUserChannelProfile);
+router.route("/history").get(verifyJWT,getWatchHistory);
 
 
 
