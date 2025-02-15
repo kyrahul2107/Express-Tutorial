@@ -4,6 +4,7 @@ import { User } from '../models/user.model.js';
 import { uploadOnCloudinary } from "../utils/Cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 const generateAccessTokenAndRefreshTokens = async (userId) => {
     try {
@@ -22,6 +23,8 @@ const generateAccessTokenAndRefreshTokens = async (userId) => {
         const accessToken = user.generateAccessToken();
 
         // Step 5: Attempt to save the user in the database with the generated tokens
+
+        user.refreshToken = refreshToken;
         try {
             await user.save({ validateBeforeSave: false });
         } catch (error) {
@@ -177,7 +180,7 @@ const LoggedOutUser = asyncHandler(async (req, res) => {
     // Remove the refresh token from the database
     await User.findByIdAndUpdate(
         req.user._id,
-        { $set: { refreshToken: undefined } },
+        { $set: { refreshToken: 1 } },
         { new: true }
     );
 
@@ -198,11 +201,10 @@ const LoggedOutUser = asyncHandler(async (req, res) => {
 });
 
 const refreshAccessToken = asyncHandler(async (req, res) => {
-    // Extract refresh token from cookies or request body
     const incomingRefreshToken = req.cookies.refreshToken || req.body.refreshToken;
 
     if (!incomingRefreshToken) {
-        throw new ApiError(401, "Unauthorized Request");
+        return res.status(401).json({ success: false, message: "Unauthorized Request" });
     }
 
     try {
@@ -218,7 +220,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
             throw new ApiError(401, "Invalid Refresh Token");
         }
 
-        // Check if refresh token matches the one stored in the database
+        // Check if refresh token matches the one stored in the database (if hashed)
         if (incomingRefreshToken !== user.refreshToken) {
             throw new ApiError(401, "Refresh Token and Incoming Refresh Token do not match");
         }
@@ -226,7 +228,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
         // Generate a new access token
         const newAccessToken = user.generateAccessToken();
 
-        // Send the new access token as a response
+        // Set the new access token in cookies (Choose this OR JSON response)
         res.cookie("accessToken", newAccessToken, {
             httpOnly: true,
             secure: true,
@@ -235,12 +237,15 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            accessToken: newAccessToken,
             message: "Access token refreshed successfully"
         });
 
     } catch (error) {
-        throw new ApiError(403, "Invalid or Expired Refresh Token");
+        if (error.name === "TokenExpiredError") {
+            throw new ApiError(403, "Refresh Token has expired. Please log in again.");
+        } else {
+            throw new ApiError(403, "Invalid Refresh Token");
+        }
     }
 });
 
@@ -275,18 +280,19 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 
     return res
         .status(200)
-        .json(200, req.user, "Current User Fetched SuccessFully")
-
+        .json(new ApiResponse(200, req.user, "Current User Fetched SuccessFully")
+        )
 })
 
 const UpdateAccountDetails = asyncHandler(async (req, res) => {
     const { fullName, email } = req.body;
-
+    console.log('Inside Update Account Details');
+    
     if (!fullName || !email) {
         throw new ApiError(400, "All Fields are Required");
     }
 
-    const user = User.findByIdAndUpdate(
+    const user =await  User.findByIdAndUpdate(
         req.user?._id,
         {
             $set: {
@@ -302,38 +308,38 @@ const UpdateAccountDetails = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, user, "Account Details Updated Successfully"));
 })
 
-const updateUserAvtar = asyncHandler(async (req, res) => {
+const updateUserAvatar = asyncHandler(async (req, res) => {
 
-    const avatarLocalPath = req.files?.path;
+    const avatarLocalPath = req.file?.path;
+    
     if (!avatarLocalPath) {
-        throw new ApiError(400, "Avtar file is missing");
+        throw new ApiError(400, "Avatar file is missing");
     }
 
     const avatar = await uploadOnCloudinary(avatarLocalPath);
 
-    if (!avatar.url) {
-        throw new ApiError(400, "Error While uploading on Avatar");
+    if (!avatar?.url) {
+        throw new ApiError(400, "Error while uploading avatar");
     }
 
-    await User.findByIdAndUpdate(
+    const updatedUser = await User.findByIdAndUpdate(
         req.user?._id,
-        {
-            $set: {
-                avatar: avatar.url
-            }
-        },
+        { $set: { avatar: avatar.url } },
         { new: true }
-    )
-    return res
-        .status(200)
-        .json(
-            new ApiResponse(200, user, "Avtar Image Uploaded SuccessFully")
-        )
-})
+    ).select("-password"); // Exclude password from response
+
+    if (!updatedUser) {
+        throw new ApiError(404, "User not found");
+    }
+
+    return res.status(200).json(
+        new ApiResponse(200, updatedUser, "Avatar Image Uploaded Successfully")
+    );
+});
 
 const updateUserCoverImage = asyncHandler(async (req, res) => {
 
-    const coverLocalPath = req.files?.path;
+    const coverLocalPath = req.file?.path;
     if (!coverLocalPath) {
         throw new ApiError(400, "Avtar file is missing");
     }
@@ -427,10 +433,13 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
 });
 
 const getWatchHistory = asyncHandler(async (req, res) => {
+    console.log('Inside Get Watch History Method');
+    
     const user = await User.aggregate([
         {
             $match: {
                 _id: new mongoose.Types.ObjectId(req.user._id),
+
             },
         },
         {
@@ -473,8 +482,6 @@ const getWatchHistory = asyncHandler(async (req, res) => {
 });
 
 
-
-
 export {
     registerUser,
     loginUser,
@@ -484,7 +491,7 @@ export {
     getCurrentUser,
     UpdateAccountDetails,
     updateUserCoverImage,
-    updateUserAvtar,
+    updateUserAvatar,
     getUserChannelProfile,
     getWatchHistory,
 };
